@@ -1,0 +1,15 @@
+# Local deployment secrets. Keep real credentials out of Git.
+secrets.h
+
+# Arduino / ESP32 build outputs.
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Local OS/editor files.
+.DS_Store
+.vscode/
+.idea/
+*.swp
