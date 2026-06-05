@@ -26,6 +26,14 @@ Primary devices:
 - In-memory audit log for control actions.
 - Tailnet-only OTA firmware upload.
 - Per-unit display name and mDNS hostname stored in NVS.
+- Sensor-read robustness: per-read retries, I2C bus recovery, post-dose settle, fail counters.
+- Local data logging to a PSRAM ring buffer (default 7 days @ 10 s) with chart + CSV export.
+- ThingSpeak cloud upload (durable history; on by default at 60 s once a key is set).
+- Alarm notifications by email (shared relay) or webhook, NTP-timestamped, state-change only.
+- Guided FOPDT auto-tune that proposes Kp/Ki via SIMC.
+- On-board ST7789 TFT status screen; NTP local-time clock.
+
+See `docs/firmware_reference.md` for the full module map, HTTP/WebSocket API, NVS keys, and config constants.
 
 ## Hardware Roles
 
@@ -58,8 +66,13 @@ Verify pump tubing and chemistry before enabling autonomous dosing.
 | `commands.*` | FreeRTOS command queue and I2C command executor |
 | `control.*` | Autonomous PI dosing logic |
 | `settings.*` | Persistent runtime settings in NVS |
+| `history.*` | PSRAM data-log ring buffer; JSON + chunked CSV |
+| `notify.*` | Alarm notifier (email-via-relay or webhook) |
+| `thingspeak.*` | Periodic ThingSpeak cloud upload |
+| `tune.*` | Guided FOPDT auto-tune → SIMC gains |
+| `display.*` | On-board ST7789 TFT status screen |
 | `console.*` | Serial console commands |
-| `net.*` | Wi-Fi and mDNS connection management |
+| `net.*` | Wi-Fi, mDNS, and NTP time |
 | `webserver.*` | HTTP API and WebSocket live updates |
 | `access.*` | Public/tailnet access control and audit log |
 | `ota.*` | OTA firmware upload handler |

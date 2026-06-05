@@ -244,6 +244,20 @@ Live values are pushed over WebSocket.
 
 ---
 
+# On-Board Display
+
+The Feather has a small TFT screen showing, at a glance:
+
+- IP address (how to reach the dashboard)
+- Hostname (unit identity)
+- Live pH, EC (mS/cm), and temperature
+- Lock and autonomous-dosing state
+- The most recent pump action
+
+The screen refreshes about once per second and never blocks control.
+
+---
+
 # Access Control
 
 The controller starts locked on every boot.
@@ -261,6 +275,19 @@ Public/proxied users:
 - Can control only while unlocked.
 - Cannot unlock the controller.
 - Cannot upload firmware.
+
+---
+
+# Updating Firmware (Over-The-Air)
+
+After a one-time USB flash, firmware updates are wireless.
+
+- Upload a new firmware file from the admin panel.
+- The device writes the inactive partition and reboots into it.
+- A bad image rolls back to the previous firmware automatically.
+- OTA is restricted to tailnet/admin access.
+
+A script can push the same firmware to every unit at once.
 
 ---
 
@@ -364,6 +391,44 @@ The firmware includes guardrails:
 - Public control lock.
 
 Software guardrails do not replace physical supervision.
+
+---
+
+# Alarm Notifications
+
+The controller can notify you when a reading crosses an alarm threshold.
+
+- One message when an alarm starts.
+- One message when it returns to normal.
+- No repeated spam while the alarm persists.
+- Messages include the time and how long the alarm lasted.
+
+Notifications can go to email (through a small relay) or to a webhook.
+
+---
+
+# Automatic Tuning (Auto-Tune)
+
+Choosing `Kp` and `Ki` by hand is hard. Auto-tune estimates them from data.
+
+1. With the system steady, the controller doses one small test bolus.
+2. It records how the reading responds over time.
+3. It fits a simple process model (gain, delay, time constant).
+4. It proposes `Kp` and `Ki` for review.
+
+You approve the values before they are applied. Nothing changes automatically.
+
+---
+
+# Time and Timestamps
+
+The controller syncs its clock over the internet (NTP).
+
+- Log records and alarm messages carry real local timestamps.
+- This makes data easier to align with events in the greenhouse.
+- Before sync, it falls back to time-since-boot.
+
+Accurate time is part of trustworthy data.
 
 ---
 
@@ -487,6 +552,31 @@ Useful data fields:
 - Crop stage
 
 Readings alone are not enough. Actions and context matter.
+
+---
+
+# On-Device Logging and Export
+
+The controller keeps a rolling history in memory.
+
+- pH, EC, and temperature are sampled at a set interval.
+- The dashboard shows a time chart of recent history.
+- Data can be exported as a CSV file for analysis.
+
+This history is held in RAM, so it is cleared on reboot or firmware update.
+Export important data before updating.
+
+---
+
+# Cloud Logging (ThingSpeak)
+
+For durable records, the controller can upload readings to ThingSpeak.
+
+- pH, EC, and temperature are sent on a fixed interval.
+- The data lives in the cloud, independent of the device.
+- It survives reboots and firmware updates.
+
+Use the on-device log for high-detail recent history, and the cloud for the long-term record.
 
 ---
 

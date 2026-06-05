@@ -149,7 +149,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="muted">Ki = 0 &rarr; proportional-only (no integral). Each channel doses once per its interval, then waits to mix (dose-and-wait). pH only doses acid; EC only adds nutrient.</div>
 
   <hr>
-  <h2>Manual pump actions</h2>
+  <h2>Manual pump actions and sensor calibrations</h2>
   <div class="row"><span>1 acid (pH↓)</span><input type="number" id="ml1" value="1.0" step="0.5"><button onclick="dispense(1)">Dispense mL</button><button class="sec" onclick="stop(1)">Stop</button></div>
   <div class="row"><span>2 nutrient A</span><input type="number" id="ml2" value="1.0" step="0.5"><button onclick="dispense(2)">Dispense mL</button><button class="sec" onclick="stop(2)">Stop</button></div>
   <div class="row"><span>3 nutrient B</span><input type="number" id="ml3" value="1.0" step="0.5"><button onclick="dispense(3)">Dispense mL</button><button class="sec" onclick="stop(3)">Stop</button></div>
@@ -194,7 +194,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <footer><span>updated <b id="age">–</b></span><span>auto-dosing: <b id="auto">–</b></span>
   <span>queue: <b id="queue">–</b></span><span>uptime: <b id="uptime">–</b></span>
-  <span id="drops" style="color:#e07a5f"></span></footer>
+  <span id="drops" style="color:#e07a5f"></span>
+  <span id="fwver" style="margin-left:auto"></span></footer>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -328,7 +329,8 @@ function saveSettings(){ const q=SKEYS.map(([k,id])=>k+'='+encodeURIComponent($(
 async function loadLog(){ try{ const r=await fetch('/api/log'); const a=await r.json();
   $("log").textContent=a.map(e=>`${(e.t/1000)|0}s  ${e.who}  ${e.action}  ${e.detail}`).join("\n"); }catch(_){} }
 async function whoami(){ try{ const r=await fetch('/api/whoami'); const j=await r.json();
-  isTailnet=(j.origin==='tailnet'); applyCaps(); if(isTailnet){ loadNotify(); loadTs(); } }catch(_){} }
+  isTailnet=(j.origin==='tailnet'); applyCaps(); if(isTailnet){ loadNotify(); loadTs(); }
+  if(j.fw) $("fwver").textContent='firmware v'+j.fw; if(j.fw&&j.build) $("fwver").title='build '+j.build; }catch(_){} }
 
 async function loadNotify(){ try{ const r=await fetch('/api/notify'); const j=await r.json();
   if(document.activeElement!==$("nfurl")) $("nfurl").value=j.url||''; $("nfon").checked=!!j.on; }catch(_){} }

@@ -13,6 +13,7 @@
 #include "notify.h"
 #include "tune.h"
 #include "thingspeak.h"
+#include "version.h"
 #include "secrets.h"
 #include <Arduino.h>
 #include <math.h>
@@ -23,7 +24,7 @@
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
-static const char* FW_VERSION = __DATE__ " " __TIME__;   // build stamp, for fleet verification
+static const char* FW_BUILD = __DATE__ " " __TIME__;     // compile timestamp (FW_VERSION is in version.h)
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -113,7 +114,8 @@ static void registerRoutes() {
     Origin o = access_origin(req);
     String j = String("{\"origin\":\"") + (o == ORIGIN_TAILNET ? "tailnet" : "public") +
                "\",\"secretOk\":" + (access_secret_ok(req) ? "true" : "false") +
-               ",\"fw\":\"" + FW_VERSION + "\",\"name\":\"" + identity_name() + "\"}";
+               ",\"fw\":\"" FW_VERSION "\",\"build\":\"" + FW_BUILD +
+               "\",\"name\":\"" + identity_name() + "\"}";
     sendJson(req, 200, j);
   });
 

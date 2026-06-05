@@ -1,4 +1,5 @@
 #pragma once
+#include <Arduino.h>
 
 // Wi-Fi station mode + mDNS. Non-blocking: kicks off the connection in
 // net_begin() and manages (re)connection state in net_tick().
