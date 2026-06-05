@@ -3,6 +3,7 @@
 #include "settings.h"
 #include "identity.h"
 #include "net.h"
+#include "secrets.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <WiFi.h>
@@ -10,7 +11,7 @@
 #include <HTTPClient.h>
 
 static Preferences   np;
-static String        g_url;
+static String        g_dest;       // user entry: an EMAIL address OR a webhook URL
 static bool          g_on = false;
 static String        prevAlarms = "";
 static unsigned long lastSent = 0;
@@ -19,16 +20,19 @@ static bool          testReq = false;
 
 void notify_begin() {
   np.begin("notify", false);
-  g_url = np.getString("url", "");
-  g_on  = np.getInt("on", 0) != 0;
+  g_dest = np.getString("url", "");
+  g_on   = np.getInt("on", 0) != 0;
 }
-const char* notify_url()     { return g_url.c_str(); }
+const char* notify_url()     { return g_dest.c_str(); }
 bool        notify_enabled() { return g_on; }
-void        notify_set(const String& url, bool on) {
-  g_url = url; g_on = on;
-  np.putString("url", url); np.putInt("on", on ? 1 : 0);
+void        notify_set(const String& dest, bool on) {
+  g_dest = dest; g_on = on;
+  np.putString("url", dest); np.putInt("on", on ? 1 : 0);
 }
 void notify_request_test() { testReq = true; }
+
+// Treat the entry as an email if it has an '@' and isn't an http(s) URL.
+static bool isEmail(const String& s) { return s.indexOf('@') > 0 && !s.startsWith("http"); }
 
 static String computeAlarms(const SensorState& s, const Settings& set) {
   String a;
@@ -40,56 +44,72 @@ static String computeAlarms(const SensorState& s, const Settings& set) {
   return a;
 }
 
-static bool postJson(const String& body) {
-  if (!net_connected() || g_url.length() < 8) return false;
+static bool httpPost(const String& url, const String& body) {
+  if (!net_connected() || url.length() < 8) return false;
   HTTPClient http;
-  http.setConnectTimeout(5000);
-  http.setTimeout(8000);
+  http.setConnectTimeout(5000); http.setTimeout(8000);
   bool ok = false;
-  if (g_url.startsWith("https")) {
-    WiFiClientSecure cs; cs.setInsecure();                 // outbound alert; no cert pinning
-    if (http.begin(cs, g_url)) { http.addHeader("Content-Type", "application/json"); int c = http.POST(body); ok = (c >= 200 && c < 300); http.end(); }
+  if (url.startsWith("https")) {
+    WiFiClientSecure cs; cs.setInsecure();
+    if (http.begin(cs, url)) {
+      http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);   // Apps Script 302-redirects on POST
+      http.addHeader("Content-Type", "application/json");
+      int c = http.POST(body); ok = (c >= 200 && c < 300); http.end();
+    }
   } else {
     WiFiClient cl;
-    if (http.begin(cl, g_url)) { http.addHeader("Content-Type", "application/json"); int c = http.POST(body); ok = (c >= 200 && c < 300); http.end(); }
+    if (http.begin(cl, url)) {
+      http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+      http.addHeader("Content-Type", "application/json");
+      int c = http.POST(body); ok = (c >= 200 && c < 300); http.end();
+    }
   }
   Serial.printf("[notify] POST -> %s\n", ok ? "ok" : "FAIL");
   return ok;
 }
 
-static String buildBody(const char* status, const String& alarms, const SensorState& s) {
+static String buildBody(const char* status, const String& alarms, const SensorState& s, const String& to) {
   char msg[170];
   snprintf(msg, sizeof(msg), "%s %s: %s (pH %.2f, EC %.2f mS, T %.1f C)",
            identity_name(), status, alarms.length() ? alarms.c_str() : "-",
            s.ph, s.ec / 1000.0, s.tempC);
   String b = "{";
+  b += "\"to\":\"";     b += to;                  b += "\",";   // recipient for the email relay
   b += "\"unit\":\"";   b += identity_name();     b += "\",";
   b += "\"status\":\""; b += status;              b += "\",";
   b += "\"alarms\":\""; b += alarms;              b += "\",";
   b += "\"msg\":\"";    b += msg;                 b += "\",";
-  b += "\"ph\":";       b += s.phValid   ? String(s.ph, 2)        : String("null"); b += ",";
-  b += "\"ec\":";       b += s.ecValid   ? String(s.ec / 1000.0, 2): String("null"); b += ",";
-  b += "\"temp\":";     b += s.tempValid ? String(s.tempC, 1)     : String("null");
+  b += "\"ph\":";       b += s.phValid   ? String(s.ph, 2)         : String("null"); b += ",";
+  b += "\"ec\":";       b += s.ecValid   ? String(s.ec / 1000.0, 2) : String("null"); b += ",";
+  b += "\"temp\":";     b += s.tempValid ? String(s.tempC, 1)      : String("null");
   b += "}";
   return b;
 }
 
+// Route to the email relay (if the entry is an email) or to the entry as a raw webhook.
+static bool sendAlert(const char* status, const String& alarms, const SensorState& s) {
+  if (g_dest.length() < 3) return false;
+  bool email = isEmail(g_dest);
+  String target = email ? String(EMAIL_RELAY_URL) : g_dest;
+  String to     = email ? g_dest : String("");
+  return httpPost(target, buildBody(status, alarms, s, to));
+}
+
 void notify_tick(const SensorState& s) {
-  if (testReq) { testReq = false; postJson(buildBody("TEST", String("test"), s)); }
+  if (testReq) { testReq = false; sendAlert("TEST", String("test"), s); }
 
   if (!g_on) return;
-  if (s.lastUpdateMs == 0 || s.lastUpdateMs == lastProcessed) return;   // only on a fresh reading
+  if (s.lastUpdateMs == 0 || s.lastUpdateMs == lastProcessed) return;
   lastProcessed = s.lastUpdateMs;
 
   String cur = computeAlarms(s, settings_get());
   unsigned long now = millis();
-
-  if (cur != prevAlarms) {                       // entered/changed/cleared
-    if (cur.length())            postJson(buildBody("ALARM", cur, s));
-    else if (prevAlarms.length())postJson(buildBody("CLEAR", prevAlarms, s));
+  if (cur != prevAlarms) {
+    if (cur.length())            sendAlert("ALARM", cur, s);
+    else if (prevAlarms.length())sendAlert("CLEAR", prevAlarms, s);
     prevAlarms = cur; lastSent = now;
-  } else if (cur.length() && now - lastSent >= NOTIFY_RENOTIFY_MS) {    // reminder while active
-    postJson(buildBody("ALARM", cur, s));
+  } else if (cur.length() && now - lastSent >= NOTIFY_RENOTIFY_MS) {
+    sendAlert("ALARM", cur, s);
     lastSent = now;
   }
 }

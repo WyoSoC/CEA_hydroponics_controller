@@ -97,7 +97,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </section>
 
 <section id="controls" hidden>
-  <h2>PI controller settings</h2>
+  <h2>Controller (PI) settings</h2>
   <details class="help"><summary>What do Kp and Ki do? (tap for intuition)</summary>
     <div class="eq">dose = K<sub>p</sub> &middot; e &nbsp;+&nbsp; K<sub>i</sub> &middot; &Sigma;(e &middot; &Delta;t)</div>
     <ul>
@@ -113,10 +113,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="muted">The dose is capped and never negative &mdash; the pump only ever <i>adds</i> (acid, or nutrient).</div>
   </details>
   <div class="row"><b>pH — acid</b></div>
-  <div class="row">setpoint <input type="number" id="s_phSp" step="0.1"> Kp <input type="number" id="s_phKp" step="0.1"> Ki <input type="number" id="s_phKi" step="0.01"> interval <input type="number" id="s_phMin" step="1"> min</div>
+  <div class="row">setpoint <input type="number" id="s_phSp" step="0.1"> &nbsp; interval <input type="number" id="s_phMin" step="1"> min</div>
+  <div class="row">gains &mdash; Kp <input type="number" id="s_phKp" step="0.1"> Ki <input type="number" id="s_phKi" step="0.01"></div>
   <div class="row">alarms — low <input type="number" id="s_phAlo" step="0.1"> high <input type="number" id="s_phAhi" step="0.1"></div>
   <div class="row"><b>EC — nutrients (pumps 2 &amp; 3, equal)</b></div>
-  <div class="row">setpoint <input type="number" id="s_ecSp" step="0.1"> mS/cm Kp <input type="number" id="s_ecKp" step="0.1"> Ki <input type="number" id="s_ecKi" step="0.01"> interval <input type="number" id="s_ecMin" step="1"> min</div>
+  <div class="row">setpoint <input type="number" id="s_ecSp" step="0.1"> mS/cm &nbsp; interval <input type="number" id="s_ecMin" step="1"> min</div>
+  <div class="row">gains &mdash; Kp <input type="number" id="s_ecKp" step="0.1"> Ki <input type="number" id="s_ecKi" step="0.01"></div>
   <div class="row">alarms — low <input type="number" id="s_ecAlo" step="0.1"> high <input type="number" id="s_ecAhi" step="0.1"> mS/cm</div>
   <div class="row"><button onclick="saveSettings()">Save settings</button> <span id="setmsg" class="muted"></span> <span class="muted" id="iterm"></span></div>
   <div class="row"><button id="autobtn" class="sec" onclick="toggleAuto()">Autonomous dosing</button>
@@ -180,11 +182,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="muted">Sets this unit's display name + mDNS hostname (&lt;host&gt;.local). Reboots to apply.</div>
   <hr>
   <div class="row"><label><input type="checkbox" id="nfon"> Alarm notifications</label>
-    <input id="nfurl" placeholder="webhook URL (Apps Script email / ntfy / Slack)" style="flex:1;min-width:220px"></div>
+    <input id="nfurl" placeholder="your@email.com  (or a webhook URL)" style="flex:1;min-width:220px"></div>
   <div class="row"><button onclick="saveNotify()">Save</button>
     <button class="sec" onclick="testNotify()">Send test</button>
     <span id="nfmsg" class="muted"></span></div>
-  <div class="muted">POSTs JSON on alarm enter/clear, re-sends every 30 min while active.</div>
+  <div class="muted">Enter an email (sent via the configured relay) or a webhook URL. Fires on alarm enter/clear, re-sends every 30 min while active.</div>
 </section>
 
 <footer><span>updated <b id="age">–</b></span><span>auto-dosing: <b id="auto">–</b></span>
