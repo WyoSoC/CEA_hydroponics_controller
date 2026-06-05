@@ -86,13 +86,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <button class="warn" onclick="clearHistory()">Clear memory</button>
       <span class="muted">1–3600 s; changing also clears history</span>
     </div>
-    <div class="row"><label><input type="checkbox" id="tson"> ThingSpeak upload</label>
-      <input id="tskey" placeholder="Write API Key" style="min-width:170px">
-      every <input type="number" id="tsint" min="15" step="5" style="width:64px"> s</div>
-    <div class="row"><button onclick="saveTs()">Save</button>
-      <button class="sec" onclick="testTs()">Send test</button>
-      <span id="tsmsg" class="muted"></span></div>
-    <div class="muted">Channel fields: 1 = pH, 2 = EC mS/cm, 3 = temperature. Free tier &ge; 15 s.</div>
+    <details class="help"><summary>ThingSpeak cloud upload</summary>
+      <div class="row"><label><input type="checkbox" id="tson"> enable</label>
+        <input id="tskey" placeholder="Write API Key" style="min-width:170px">
+        every <input type="number" id="tsint" min="15" step="5" style="width:64px"> s</div>
+      <div class="row"><button onclick="saveTs()">Save</button>
+        <button class="sec" onclick="testTs()">Send test</button>
+        <span id="tsmsg" class="muted"></span></div>
+      <div class="muted">Fields: 1 = pH, 2 = EC mS/cm, 3 = temperature. Free tier &ge; 15 s. On by default &mdash; add your Write API Key.</div>
+    </details>
+    <details class="help"><summary>Alarm notifications (email / webhook)</summary>
+      <div class="row"><label><input type="checkbox" id="nfon"> enable</label>
+        <input id="nfurl" placeholder="your@email.com  (or a webhook URL)" style="flex:1;min-width:200px"></div>
+      <div class="row"><button onclick="saveNotify()">Save</button>
+        <button class="sec" onclick="testNotify()">Send test</button>
+        <span id="nfmsg" class="muted"></span></div>
+      <div class="muted">Email (via the configured relay) or a webhook URL. Fires on alarm enter/clear, re-sends every 30 min while active. Saved in NVS (persists across reboot/OTA).</div>
+    </details>
   </div>
 </section>
 
@@ -139,7 +149,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="muted">Ki = 0 &rarr; proportional-only (no integral). Each channel doses once per its interval, then waits to mix (dose-and-wait). pH only doses acid; EC only adds nutrient.</div>
 
   <hr>
-  <h2>Pumps</h2>
+  <h2>Manual pump actions</h2>
   <div class="row"><span>1 acid (pH↓)</span><input type="number" id="ml1" value="1.0" step="0.5"><button onclick="dispense(1)">Dispense mL</button><button class="sec" onclick="stop(1)">Stop</button></div>
   <div class="row"><span>2 nutrient A</span><input type="number" id="ml2" value="1.0" step="0.5"><button onclick="dispense(2)">Dispense mL</button><button class="sec" onclick="stop(2)">Stop</button></div>
   <div class="row"><span>3 nutrient B</span><input type="number" id="ml3" value="1.0" step="0.5"><button onclick="dispense(3)">Dispense mL</button><button class="sec" onclick="stop(3)">Stop</button></div>
@@ -180,13 +190,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="row">Unit name <input id="idname" style="width:150px"> hostname <input id="idhost" style="width:150px">
     <button onclick="setIdentity()">Rename &amp; reboot</button> <span id="idmsg" class="muted"></span></div>
   <div class="muted">Sets this unit's display name + mDNS hostname (&lt;host&gt;.local). Reboots to apply.</div>
-  <hr>
-  <div class="row"><label><input type="checkbox" id="nfon"> Alarm notifications</label>
-    <input id="nfurl" placeholder="your@email.com  (or a webhook URL)" style="flex:1;min-width:220px"></div>
-  <div class="row"><button onclick="saveNotify()">Save</button>
-    <button class="sec" onclick="testNotify()">Send test</button>
-    <span id="nfmsg" class="muted"></span></div>
-  <div class="muted">Enter an email (sent via the configured relay) or a webhook URL. Fires on alarm enter/clear, re-sends every 30 min while active.</div>
 </section>
 
 <footer><span>updated <b id="age">–</b></span><span>auto-dosing: <b id="auto">–</b></span>

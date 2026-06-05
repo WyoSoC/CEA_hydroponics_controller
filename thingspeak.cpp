@@ -16,7 +16,7 @@ static bool          testReq = false;
 void ts_begin() {
   tp.begin("ts", false);
   g_key = tp.getString("key", "");
-  g_on  = tp.getInt("on", 0) != 0;
+  g_on  = tp.getInt("on", 1) != 0;   // enabled by default (no-op until a Write API Key is set)
   g_int = tp.getInt("int", TS_DEFAULT_INTERVAL_S);
   if (g_int < TS_MIN_INTERVAL_S) g_int = TS_MIN_INTERVAL_S;
 }
