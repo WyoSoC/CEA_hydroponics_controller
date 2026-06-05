@@ -79,8 +79,13 @@ constexpr float         TUNE_MIN_CHANGE_PH = 0.10f;    // need >= this much move
 constexpr float         TUNE_MIN_CHANGE_EC = 0.05f;    // mS/cm
 constexpr float         TUNE_LAMBDA_FACTOR = 2.0f;     // lambda = factor * dead-time (conservative)
 
+// ===== Time (NTP) =====
+#define NTP_SERVER1 "pool.ntp.org"
+#define NTP_SERVER2 "time.nist.gov"
+#define TZ_INFO     "MST7MDT,M3.2.0,M11.1.0"   // US Mountain (Wyoming), auto-DST
+
 // ===== Alarm notifications =====
-constexpr unsigned long NOTIFY_RENOTIFY_MS = 30UL * 60UL * 1000UL;  // re-send while an alarm persists
+// Email only on STATE CHANGE: one on alarm enter, one on return-to-normal. No re-sending.
 
 // ===== ThingSpeak cloud upload =====
 constexpr int TS_MIN_INTERVAL_S     = 15;    // free-tier minimum between updates

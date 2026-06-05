@@ -5,3 +5,6 @@
 void net_begin();
 void net_tick();
 bool net_connected();
+
+bool   net_time_valid();   // true once NTP has synced
+String net_time_str();     // "YYYY-MM-DD HH:MM:SS" local, or "uptime Ns" before sync

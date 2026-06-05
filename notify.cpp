@@ -14,9 +14,10 @@ static Preferences   np;
 static String        g_dest;       // user entry: an EMAIL address OR a webhook URL
 static bool          g_on = false;
 static String        prevAlarms = "";
-static unsigned long lastSent = 0;
 static unsigned long lastProcessed = 0;
 static bool          testReq = false;
+static unsigned long alarmStartMs = 0;   // when the current alarm episode began
+static String        alarmStartStr = ""; // wall-clock string at episode start
 
 void notify_begin() {
   np.begin("notify", false);
@@ -31,7 +32,6 @@ void        notify_set(const String& dest, bool on) {
 }
 void notify_request_test() { testReq = true; }
 
-// Treat the entry as an email if it has an '@' and isn't an http(s) URL.
 static bool isEmail(const String& s) { return s.indexOf('@') > 0 && !s.startsWith("http"); }
 
 static String computeAlarms(const SensorState& s, const Settings& set) {
@@ -42,6 +42,16 @@ static String computeAlarms(const SensorState& s, const Settings& set) {
   if (s.ecValid && ec_mS < set.ec_lo) { if (a.length()) a += ","; a += "EC LOW";  }
   if (s.ecValid && ec_mS > set.ec_hi) { if (a.length()) a += ","; a += "EC HIGH"; }
   return a;
+}
+
+static String fmtDuration(unsigned long ms) {
+  unsigned long s = ms / 1000, m = s / 60, h = m / 60;
+  s %= 60; m %= 60;
+  char b[24];
+  if (h) snprintf(b, sizeof(b), "%luh %lum", h, m);
+  else if (m) snprintf(b, sizeof(b), "%lum %lus", m, s);
+  else snprintf(b, sizeof(b), "%lus", s);
+  return String(b);
 }
 
 static bool httpPost(const String& url, const String& body) {
@@ -68,48 +78,55 @@ static bool httpPost(const String& url, const String& body) {
   return ok;
 }
 
-static String buildBody(const char* status, const String& alarms, const SensorState& s, const String& to) {
-  char msg[170];
-  snprintf(msg, sizeof(msg), "%s %s: %s (pH %.2f, EC %.2f mS, T %.1f C)",
-           identity_name(), status, alarms.length() ? alarms.c_str() : "-",
-           s.ph, s.ec / 1000.0, s.tempC);
-  String b = "{";
-  b += "\"to\":\"";     b += to;                  b += "\",";   // recipient for the email relay
-  b += "\"unit\":\"";   b += identity_name();     b += "\",";
-  b += "\"status\":\""; b += status;              b += "\",";
-  b += "\"alarms\":\""; b += alarms;              b += "\",";
-  b += "\"msg\":\"";    b += msg;                 b += "\",";
-  b += "\"ph\":";       b += s.phValid   ? String(s.ph, 2)         : String("null"); b += ",";
-  b += "\"ec\":";       b += s.ecValid   ? String(s.ec / 1000.0, 2) : String("null"); b += ",";
-  b += "\"temp\":";     b += s.tempValid ? String(s.tempC, 1)      : String("null");
-  b += "}";
-  return b;
+static String jescape(const String& in) {   // minimal: keep JSON valid
+  String o; for (size_t i = 0; i < in.length(); i++) { char c = in[i]; if (c != '"' && c != '\\') o += c; } return o;
 }
 
-// Route to the email relay (if the entry is an email) or to the entry as a raw webhook.
-static bool sendAlert(const char* status, const String& alarms, const SensorState& s) {
+// `timing` is a human phrase already formatted (e.g. "triggered 2026-06-05 14:23:01").
+static bool sendAlert(const char* status, const String& alarms, const SensorState& s, const String& timing) {
   if (g_dest.length() < 3) return false;
   bool email = isEmail(g_dest);
   String target = email ? String(EMAIL_RELAY_URL) : g_dest;
   String to     = email ? g_dest : String("");
-  return httpPost(target, buildBody(status, alarms, s, to));
+
+  char head[180];
+  snprintf(head, sizeof(head), "%s %s: %s (pH %.2f, EC %.2f mS, T %.1f C)",
+           identity_name(), status, alarms.length() ? alarms.c_str() : "-",
+           s.ph, s.ec / 1000.0, s.tempC);
+  String msg = String(head) + " | " + timing;
+
+  String b = "{";
+  b += "\"to\":\"";     b += jescape(to);            b += "\",";
+  b += "\"unit\":\"";   b += jescape(identity_name()); b += "\",";
+  b += "\"status\":\""; b += status;                 b += "\",";
+  b += "\"alarms\":\""; b += jescape(alarms);        b += "\",";
+  b += "\"time\":\"";   b += jescape(net_time_str()); b += "\",";
+  b += "\"msg\":\"";    b += jescape(msg);           b += "\",";
+  b += "\"ph\":";       b += s.phValid   ? String(s.ph, 2)          : String("null"); b += ",";
+  b += "\"ec\":";       b += s.ecValid   ? String(s.ec / 1000.0, 2) : String("null"); b += ",";
+  b += "\"temp\":";     b += s.tempValid ? String(s.tempC, 1)       : String("null");
+  b += "}";
+  return httpPost(target, b);
 }
 
 void notify_tick(const SensorState& s) {
-  if (testReq) { testReq = false; sendAlert("TEST", String("test"), s); }
+  if (testReq) { testReq = false; sendAlert("TEST", String("test"), s, "sent " + net_time_str()); }
 
   if (!g_on) return;
-  if (s.lastUpdateMs == 0 || s.lastUpdateMs == lastProcessed) return;
+  if (s.lastUpdateMs == 0 || s.lastUpdateMs == lastProcessed) return;   // act once per fresh reading
   lastProcessed = s.lastUpdateMs;
 
   String cur = computeAlarms(s, settings_get());
+  if (cur == prevAlarms) return;                                        // ONLY on a state change
+
   unsigned long now = millis();
-  if (cur != prevAlarms) {
-    if (cur.length())            sendAlert("ALARM", cur, s);
-    else if (prevAlarms.length())sendAlert("CLEAR", prevAlarms, s);
-    prevAlarms = cur; lastSent = now;
-  } else if (cur.length() && now - lastSent >= NOTIFY_RENOTIFY_MS) {
-    sendAlert("ALARM", cur, s);
-    lastSent = now;
+  if (cur.length()) {                                                   // entering / changing alarm
+    if (prevAlarms.length() == 0) { alarmStartMs = now; alarmStartStr = net_time_str(); }
+    sendAlert("ALARM", cur, s, "triggered " + net_time_str());
+  } else {                                                              // back to normal
+    String dur = alarmStartMs ? fmtDuration(now - alarmStartMs) : String("?");
+    sendAlert("CLEAR", prevAlarms, s, "cleared " + net_time_str() + ", lasted " + dur);
+    alarmStartMs = 0; alarmStartStr = "";
   }
+  prevAlarms = cur;
 }
