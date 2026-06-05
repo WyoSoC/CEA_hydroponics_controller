@@ -25,6 +25,11 @@
 #include "commands.h"
 #include "control.h"
 #include "settings.h"
+#include "history.h"
+#include "display.h"
+#include "notify.h"
+#include "tune.h"
+#include "thingspeak.h"
 #include "console.h"
 #include "net.h"
 #include "webserver.h"
@@ -42,11 +47,16 @@ void setup() {
   commands_begin();
   settings_begin();                     // load control settings from NVS
   identity_begin();                     // load per-unit name/hostname from NVS
+  history_begin();                      // allocate data-log ring buffer (PSRAM)
+  notify_begin();                       // load alarm-notifier webhook config from NVS
+  ts_begin();                           // load ThingSpeak upload config from NVS
+  tune_begin();                         // auto-tune state machine
   control_begin();
   console_begin();
   access_begin();                       // lock state (default LOCKED) + audit log
   net_begin();                          // Wi-Fi station (non-blocking)
   web_begin();                          // HTTP + WebSocket server
+  display_begin();                      // on-board TFT status screen
 
   Serial.println(F("\nHydroponics controller — core + web ready. Type 'help'."));
 }
@@ -59,7 +69,12 @@ void loop() {
     if (commands_pop(c)) commands_execute(c);
   }
 
+  tune_tick(sensors_snapshot());        // auto-tune step-response (no-op unless running)
   control_tick(sensors_snapshot());     // autonomous dosing (no-op unless enabled)
+  history_tick(sensors_snapshot());     // sample into the data log every LOG_INTERVAL_S
+  notify_tick(sensors_snapshot());      // fire alarm notifications on transitions
+  ts_tick(sensors_snapshot());          // periodic ThingSpeak upload
+  display_tick(sensors_snapshot());     // refresh the TFT (~1 Hz internally)
   console_tick();                       // serial UI
   net_tick();                           // manage Wi-Fi (re)connection
   web_tick();                           // ws client cleanup

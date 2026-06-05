@@ -17,3 +17,8 @@ void sensors_tick();             // non-blocking; call every loop()
 bool sensors_idle();             // true between poll cycles -> safe to run a queued I2C command
 bool sensors_consume_new();      // returns true once after each completed reading
 SensorState sensors_snapshot();  // copy of the latest state (safe to read anytime)
+
+void sensors_pause(unsigned long ms);  // defer the next poll cycle (e.g., to let a dose settle)
+int  sensors_fail_ph();          // consecutive read failures (0 when healthy)
+int  sensors_fail_ec();
+int  sensors_fail_temp();

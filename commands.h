@@ -27,3 +27,7 @@ bool    commands_enqueue(const Command& c);// thread-safe; false if full
 bool    commands_pop(Command& c);          // non-blocking
 void    commands_execute(const Command& c);// runs the I2C exchange (main loop only)
 uint8_t commands_pending();                // queued count
+
+// Last pump action (for the TFT). e.g. "acid 0.50mL" / "stop nutA". 0 ms = none yet.
+const char*   commands_last_action();
+unsigned long commands_last_action_ms();

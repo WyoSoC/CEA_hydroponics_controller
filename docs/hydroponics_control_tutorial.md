@@ -6,6 +6,46 @@ paginate: true
 theme: default
 ---
 
+<style>
+section {
+  font-size: 25px;
+  line-height: 1.25;
+  padding: 46px 64px 42px;
+}
+
+section h1 {
+  font-size: 42px;
+  margin: 0 0 0.35em;
+}
+
+section h2 {
+  font-size: 30px;
+  margin: 0.2em 0 0.45em;
+}
+
+section p {
+  margin: 0.35em 0;
+}
+
+section ul,
+section ol {
+  margin: 0.35em 0 0;
+}
+
+section li {
+  margin: 0.14em 0;
+}
+
+section table {
+  font-size: 21px;
+}
+
+section pre,
+section code {
+  font-size: 0.82em;
+}
+</style>
+
 # Hydroponics Control Tutorial
 
 ## Monitoring, Calibration, Data Collection, Analysis, and Testing

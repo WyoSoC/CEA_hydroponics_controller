@@ -9,14 +9,21 @@
 #include "ota.h"
 #include "settings.h"
 #include "identity.h"
+#include "history.h"
+#include "notify.h"
+#include "tune.h"
+#include "thingspeak.h"
 #include "secrets.h"
 #include <Arduino.h>
 #include <math.h>
+#include <memory>
+#include <string.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
+static const char* FW_VERSION = __DATE__ " " __TIME__;   // build stamp, for fleet verification
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -53,7 +60,7 @@ static void buildJson(char* out, size_t n) {
     "\"phLo\":%s,\"phHi\":%s,\"ecLo\":%s,\"ecHi\":%s,"
     "\"phSp\":%.2f,\"phAlo\":%.2f,\"phAhi\":%.2f,\"phKp\":%.2f,\"phKi\":%.3f,\"phMin\":%u,"
     "\"ecSp\":%.2f,\"ecAlo\":%.2f,\"ecAhi\":%.2f,\"ecKp\":%.2f,\"ecKi\":%.3f,\"ecMin\":%u,"
-    "\"iPh\":%.2f,\"iEc\":%.2f}",
+    "\"iPh\":%.2f,\"iEc\":%.2f,\"phF\":%d,\"ecF\":%d,\"tF\":%d}",
     identity_name(),
     ph,   s.phValid   ? "true" : "false",
     ec,   s.ecValid   ? "true" : "false",
@@ -67,7 +74,8 @@ static void buildJson(char* out, size_t n) {
     ecLo ? "true" : "false", ecHi ? "true" : "false",
     set.ph_sp, set.ph_lo, set.ph_hi, set.ph_kp, set.ph_ki, (unsigned)set.ph_min,
     set.ec_sp, set.ec_lo, set.ec_hi, set.ec_kp, set.ec_ki, (unsigned)set.ec_min,
-    control_integral_ph(), control_integral_ec());
+    control_integral_ph(), control_integral_ec(),
+    sensors_fail_ph(), sensors_fail_ec(), sensors_fail_temp());
 }
 
 // ---- websocket -------------------------------------------------------------
@@ -95,14 +103,17 @@ static void cmdReporter(const char* msg) {
 static void registerRoutes() {
   // page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    req->send_P(200, "text/html", INDEX_HTML);
+    AsyncWebServerResponse* r = req->beginResponse_P(200, "text/html", INDEX_HTML);
+    r->addHeader("Cache-Control", "no-store");   // always serve fresh page after an OTA
+    req->send(r);
   });
 
   // who is this caller (origin), for the UI to decide what to show
   server.on("/api/whoami", HTTP_GET, [](AsyncWebServerRequest* req) {
     Origin o = access_origin(req);
     String j = String("{\"origin\":\"") + (o == ORIGIN_TAILNET ? "tailnet" : "public") +
-               "\",\"secretOk\":" + (access_secret_ok(req) ? "true" : "false") + "}";
+               "\",\"secretOk\":" + (access_secret_ok(req) ? "true" : "false") +
+               ",\"fw\":\"" + FW_VERSION + "\",\"name\":\"" + identity_name() + "\"}";
     sendJson(req, 200, j);
   });
 
@@ -222,6 +233,115 @@ static void registerRoutes() {
     String j = String("{\"ok\":true,\"reboot\":true,\"name\":\"") + identity_name() +
                "\",\"host\":\"" + identity_host() + "\"}";   // return the sanitized applied values
     sendJson(req, 200, j);
+  });
+
+  // history — downsampled JSON for charting (read; any origin)
+  server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest* req) {
+    size_t n = qp(req, "n").length() ? (size_t)qp(req, "n").toInt() : 600;
+    if (n < 10) n = 10; if (n > 2000) n = 2000;
+    sendJson(req, 200, history_json(n));
+  });
+
+  // logging interval (5/10/30 s) — tailnet only (changing clears history)
+  server.on("/api/loginterval", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    int s = qp(req, "s").toInt();
+    if (!history_set_interval(s)) { sendJson(req, 400, "{\"err\":\"s must be 1..3600\"}"); return; }
+    access_log(ORIGIN_TAILNET, "loginterval", String(s).c_str());
+    sendJson(req, 200, String("{\"ok\":true,\"interval\":") + s + "}");
+  });
+
+  // clear the logged history — tailnet only
+  server.on("/api/history/clear", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    history_clear(); access_log(ORIGIN_TAILNET, "history", "cleared");
+    sendJson(req, 200, "{\"ok\":true}");
+  });
+
+  // history CSV export — chunked so we never build a multi-MB String in RAM
+  server.on("/api/history.csv", HTTP_GET, [](AsyncWebServerRequest* req) {
+    auto cursor = std::make_shared<size_t>(0);
+    size_t total = history_count();
+    AsyncWebServerResponse* res = req->beginChunkedResponse("text/csv",
+      [cursor, total](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+        size_t w = 0;
+        if (index == 0) {
+          const char* h = "sec_ago,ph,ec_mS,temp\n"; size_t hl = strlen(h);
+          if (hl > maxLen) return 0;
+          memcpy(buffer, h, hl); w += hl;
+        }
+        char line[48];
+        while (*cursor < total) {
+          size_t l = history_csv_line(*cursor, line, sizeof(line));
+          if (w + l > maxLen) break;
+          memcpy(buffer + w, line, l); w += l; (*cursor)++;
+        }
+        return w;   // 0 -> response complete
+      });
+    res->addHeader("Content-Disposition", "attachment; filename=hydro_history.csv");
+    req->send(res);
+  });
+
+  // alarm notifier config — tailnet only
+  server.on("/api/notify", HTTP_GET, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    sendJson(req, 200, String("{\"on\":") + (notify_enabled() ? "true" : "false") +
+                       ",\"url\":\"" + notify_url() + "\"}");
+  });
+  server.on("/api/notify", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    bool on = (qp(req, "on") == "1" || qp(req, "on") == "true");
+    notify_set(qp(req, "url"), on);
+    access_log(ORIGIN_TAILNET, "notify", on ? "on" : "off");
+    sendJson(req, 200, "{\"ok\":true}");
+  });
+  server.on("/api/notify/test", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    notify_request_test();          // actual POST happens in the main loop
+    sendJson(req, 200, "{\"ok\":true,\"queued\":true}");
+  });
+
+  // auto-tune — status readable; start/apply/abort are control-gated
+  server.on("/api/tune", HTTP_GET, [](AsyncWebServerRequest* req) {
+    sendJson(req, 200, tune_status_json());
+  });
+  server.on("/api/tune/start", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!access_can_control(access_origin(req))) { sendJson(req, 403, "{\"err\":\"locked\"}"); return; }
+    String ch = qp(req, "ch");
+    char c = (ch == "ph") ? 'p' : (ch == "ec") ? 'e' : 0;
+    bool ok = (c != 0) && tune_start(c);
+    access_log(access_origin(req), "tune", ch.c_str());
+    sendJson(req, ok ? 200 : 409, ok ? "{\"ok\":true}" : "{\"err\":\"cannot start (busy/invalid/no reading)\"}");
+  });
+  server.on("/api/tune/apply", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!access_can_control(access_origin(req))) { sendJson(req, 403, "{\"err\":\"locked\"}"); return; }
+    tune_apply(); access_log(access_origin(req), "tune", "apply");
+    sendJson(req, 200, "{\"ok\":true}");
+  });
+  server.on("/api/tune/abort", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (!access_can_control(access_origin(req))) { sendJson(req, 403, "{\"err\":\"locked\"}"); return; }
+    tune_abort();
+    sendJson(req, 200, "{\"ok\":true}");
+  });
+
+  // ThingSpeak cloud upload config — tailnet only
+  server.on("/api/thingspeak", HTTP_GET, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    sendJson(req, 200, String("{\"on\":") + (ts_enabled() ? "true" : "false") +
+                       ",\"key\":\"" + ts_key() + "\",\"interval\":" + ts_interval() + "}");
+  });
+  server.on("/api/thingspeak", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    bool on = (qp(req, "on") == "1" || qp(req, "on") == "true");
+    int iv = qp(req, "interval").length() ? qp(req, "interval").toInt() : TS_DEFAULT_INTERVAL_S;
+    ts_set(qp(req, "key"), on, iv);
+    access_log(ORIGIN_TAILNET, "thingspeak", on ? "on" : "off");
+    sendJson(req, 200, "{\"ok\":true}");
+  });
+  server.on("/api/thingspeak/test", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    ts_request_test();
+    sendJson(req, 200, "{\"ok\":true,\"queued\":true}");
   });
 
   // OTA firmware upload — tailnet only (see ota.cpp)

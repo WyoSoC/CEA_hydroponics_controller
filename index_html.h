@@ -58,8 +58,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </style>
 </head>
 <body>
-<header><span id="dot"></span><h1 id="name">Hydroponics</h1><span id="conn">connecting…</span></header>
-<div id="lockbar" class="locked">…</div>
+<header><span id="dot"></span><h1 id="name">Hydroponics</h1><span id="conn">connecting…</span><span id="lockicon" title="" style="margin-left:auto;font-size:18px"></span></header>
+<div id="lockbar" style="display:none"></div>
 <div id="alarmbar"></div>
 
 <main>
@@ -68,15 +68,36 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="card temp"><div class="label">Temperature</div><div class="val" id="temp">--<span class="unit">°C</span></div></div>
 </main>
 
-<section id="controls" hidden>
-  <h2>Pumps</h2>
-  <div class="row"><span>1 acid (pH↓)</span><input type="number" id="ml1" value="1.0" step="0.5"><button onclick="dispense(1)">Dispense mL</button><button class="sec" onclick="stop(1)">Stop</button></div>
-  <div class="row"><span>2 nutrient A</span><input type="number" id="ml2" value="1.0" step="0.5"><button onclick="dispense(2)">Dispense mL</button><button class="sec" onclick="stop(2)">Stop</button></div>
-  <div class="row"><span>3 nutrient B</span><input type="number" id="ml3" value="1.0" step="0.5"><button onclick="dispense(3)">Dispense mL</button><button class="sec" onclick="stop(3)">Stop</button></div>
-  <div class="row"><button class="warn" onclick="stop(0)">STOP ALL</button><span class="muted">max single dose 25 mL; negative = reverse</span></div>
+<section id="historysec">
+  <h2>History (logged locally)</h2>
+  <canvas id="chart" style="width:100%;height:190px;display:block"></canvas>
+  <div class="row muted">
+    <span id="lgph" style="color:#f39c12">pH</span>
+    <span id="lgec" style="color:#3498db">EC mS/cm</span>
+    <span id="lgtemp" style="color:#1ab6c8">temp &deg;C</span>
+    <span id="histinfo"></span>
+    <a href="/api/history.csv" style="color:#8ad">download CSV</a>
+  </div>
+  <div id="histadmin" hidden>
+    <div class="row">
+      interval <select id="logsel" onchange="setLogInterval()"><option value="5">5 s</option><option value="10">10 s</option><option value="30">30 s</option></select>
+      or <input type="number" id="loginput" min="1" max="3600" step="1" style="width:70px"> s
+      <button onclick="setLogIntervalCustom()">Set</button>
+      <button class="warn" onclick="clearHistory()">Clear memory</button>
+      <span class="muted">1–3600 s; changing also clears history</span>
+    </div>
+    <div class="row"><label><input type="checkbox" id="tson"> ThingSpeak upload</label>
+      <input id="tskey" placeholder="Write API Key" style="min-width:170px">
+      every <input type="number" id="tsint" min="15" step="5" style="width:64px"> s</div>
+    <div class="row"><button onclick="saveTs()">Save</button>
+      <button class="sec" onclick="testTs()">Send test</button>
+      <span id="tsmsg" class="muted"></span></div>
+    <div class="muted">Channel fields: 1 = pH, 2 = EC mS/cm, 3 = temperature. Free tier &ge; 15 s.</div>
+  </div>
+</section>
 
-  <hr>
-  <h2>Control settings (PI)</h2>
+<section id="controls" hidden>
+  <h2>PI controller settings</h2>
   <details class="help"><summary>What do Kp and Ki do? (tap for intuition)</summary>
     <div class="eq">dose = K<sub>p</sub> &middot; e &nbsp;+&nbsp; K<sub>i</sub> &middot; &Sigma;(e &middot; &Delta;t)</div>
     <ul>
@@ -98,30 +119,51 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="row">setpoint <input type="number" id="s_ecSp" step="0.1"> mS/cm Kp <input type="number" id="s_ecKp" step="0.1"> Ki <input type="number" id="s_ecKi" step="0.01"> interval <input type="number" id="s_ecMin" step="1"> min</div>
   <div class="row">alarms — low <input type="number" id="s_ecAlo" step="0.1"> high <input type="number" id="s_ecAhi" step="0.1"> mS/cm</div>
   <div class="row"><button onclick="saveSettings()">Save settings</button> <span id="setmsg" class="muted"></span> <span class="muted" id="iterm"></span></div>
-  <div class="muted">Ki = 0 → proportional-only (no integral). Each channel doses once per its interval, then waits to mix (dose-and-wait). pH only doses acid; EC only adds nutrient.</div>
+  <div class="row"><button id="autobtn" class="sec" onclick="toggleAuto()">Autonomous dosing</button>
+    <span class="muted">runs the PI loop to hold the setpoints (Save only stores values)</span></div>
+
+  <details class="help" id="autotune"><summary>Auto-tune — fit Kp/Ki from a test dose</summary>
+    <div class="muted">Turn autonomous OFF and let readings settle first. Doses one small bolus, watches the
+      response (can take several minutes), then proposes gains to review. The pH dose is intentionally
+      small (overshoot is irreversible). Uses an FOPDT fit + SIMC tuning (robust, no overshoot).</div>
+    <div class="row"><button onclick="tuneStart('ph')">Tune pH</button>
+      <button onclick="tuneStart('ec')">Tune EC</button>
+      <button class="sec" onclick="tuneAbort()">Stop</button></div>
+    <div id="tunestat" class="muted">idle</div>
+    <div class="row" id="tuneresult" hidden>
+      <button onclick="tuneApply()">Apply gains</button>
+      <button class="sec" onclick="tuneAbort()">Discard</button></div>
+  </details>
+  <div class="muted">Ki = 0 &rarr; proportional-only (no integral). Each channel doses once per its interval, then waits to mix (dose-and-wait). pH only doses acid; EC only adds nutrient.</div>
 
   <hr>
-  <h2>Calibration wizard</h2>
-  <div class="row calhead">
-    <select id="cdev" onchange="renderCal()">
-      <option value="ph">pH</option><option value="ec">EC</option><option value="rtd">RTD / Temp</option><option value="pump">Pumps</option>
-    </select>
-    <span id="calreading" class="muted"></span><span id="calstab"></span>
-    <button class="sec" onclick="calStatus()">Check status</button>
-    <button class="sec" onclick="calClear()">Clear cal</button>
-  </div>
-  <div id="calsteps"></div>
-  <div id="calresult"></div>
+  <h2>Pumps</h2>
+  <div class="row"><span>1 acid (pH↓)</span><input type="number" id="ml1" value="1.0" step="0.5"><button onclick="dispense(1)">Dispense mL</button><button class="sec" onclick="stop(1)">Stop</button></div>
+  <div class="row"><span>2 nutrient A</span><input type="number" id="ml2" value="1.0" step="0.5"><button onclick="dispense(2)">Dispense mL</button><button class="sec" onclick="stop(2)">Stop</button></div>
+  <div class="row"><span>3 nutrient B</span><input type="number" id="ml3" value="1.0" step="0.5"><button onclick="dispense(3)">Dispense mL</button><button class="sec" onclick="stop(3)">Stop</button></div>
+  <div class="row"><button class="warn" onclick="stop(0)">STOP ALL</button><span class="muted">max single dose 25 mL; negative = reverse</span></div>
 
   <hr>
-  <details><summary class="muted">Advanced: raw EZO command</summary>
-    <div class="row"><select id="rawdev"><option>ph</option><option>ec</option><option>rtd</option><option>p1</option><option>p2</option><option>p3</option></select>
-      <input id="rawcmd" placeholder="e.g. Status" style="flex:1;min-width:140px"><button onclick="rawSend()">Send</button></div>
+  <details class="help"><summary>Calibration — pH / EC / RTD / pumps (open only when calibrating)</summary>
+    <div class="row calhead">
+      <select id="cdev" onchange="renderCal()">
+        <option value="ph">pH</option><option value="ec">EC</option><option value="rtd">RTD / Temp</option><option value="pump">Pumps</option>
+      </select>
+      <span id="calreading" class="muted"></span><span id="calstab"></span>
+      <button class="sec" onclick="calStatus()">Check status</button>
+      <button class="sec" onclick="calClear()">Clear cal</button>
+    </div>
+    <div id="calsteps"></div>
+    <div id="calresult"></div>
+    <details><summary class="muted">Advanced: raw EZO command</summary>
+      <div class="row"><select id="rawdev"><option>ph</option><option>ec</option><option>rtd</option><option>p1</option><option>p2</option><option>p3</option></select>
+        <input id="rawcmd" placeholder="e.g. Status" style="flex:1;min-width:140px"><button onclick="rawSend()">Send</button></div>
+    </details>
   </details>
 </section>
 
 <section id="admin" hidden>
-  <h2>Instructor (tailnet)</h2>
+  <h2>Management</h2>
   <div class="row">unlock for <input type="number" id="umin" value="60" step="5"> min
     <button onclick="unlock()">Unlock public control</button>
     <button class="warn" onclick="lock()">Lock</button>
@@ -136,10 +178,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="row">Unit name <input id="idname" style="width:150px"> hostname <input id="idhost" style="width:150px">
     <button onclick="setIdentity()">Rename &amp; reboot</button> <span id="idmsg" class="muted"></span></div>
   <div class="muted">Sets this unit's display name + mDNS hostname (&lt;host&gt;.local). Reboots to apply.</div>
+  <hr>
+  <div class="row"><label><input type="checkbox" id="nfon"> Alarm notifications</label>
+    <input id="nfurl" placeholder="webhook URL (Apps Script email / ntfy / Slack)" style="flex:1;min-width:220px"></div>
+  <div class="row"><button onclick="saveNotify()">Save</button>
+    <button class="sec" onclick="testNotify()">Send test</button>
+    <span id="nfmsg" class="muted"></span></div>
+  <div class="muted">POSTs JSON on alarm enter/clear, re-sends every 30 min while active.</div>
 </section>
 
 <footer><span>updated <b id="age">–</b></span><span>auto-dosing: <b id="auto">–</b></span>
-  <span>queue: <b id="queue">–</b></span><span>uptime: <b id="uptime">–</b></span></footer>
+  <span>queue: <b id="queue">–</b></span><span>uptime: <b id="uptime">–</b></span>
+  <span id="drops" style="color:#e07a5f"></span></footer>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -149,13 +199,19 @@ let hist={ph:[],ec:[],temp:[]};
 function fmt(v,ok,dp){ return ok ? Number(v).toFixed(dp) : "--"; }
 function setConn(live){ $("dot").classList.toggle("live",live); $("conn").textContent=live?"live":"disconnected — retrying"; }
 function canControl(){ return isTailnet || !st.locked; }
-function applyCaps(){ $("admin").hidden=!isTailnet; $("controls").hidden=!canControl(); }
+function applyCaps(){ $("admin").hidden=!isTailnet; $("controls").hidden=!canControl(); $("histadmin").hidden=!isTailnet; }
 
 function renderLock(){
-  const bar=$("lockbar");
-  if(st.locked){ bar.className="locked"; bar.textContent="🔒 LOCKED — public control disabled"; }
-  else { const m=Math.floor(remain/60), s=remain%60; bar.className="unlocked";
-    bar.textContent=`🔓 UNLOCKED — public control enabled · ${m}:${String(s).padStart(2,'0')} remaining`; }
+  const bar=$("lockbar"), ic=$("lockicon");
+  if(st.locked){
+    bar.style.display="none";                       // locked = default: no big banner, just a subtle icon
+    if(ic){ ic.textContent="🔒"; ic.title="Locked — public control disabled"; }
+  } else {
+    bar.style.display=""; bar.className="unlocked";  // unlocked is noteworthy -> keep the prominent banner
+    const m=Math.floor(remain/60), s=remain%60;
+    bar.textContent=`🔓 UNLOCKED — public control enabled · ${m}:${String(s).padStart(2,'0')} remaining`;
+    if(ic){ ic.textContent="🔓"; ic.title="Unlocked — public control enabled"; }
+  }
 }
 function renderAlarms(){
   const a=[]; if(st.phHi)a.push('pH HIGH'); if(st.phLo)a.push('pH LOW'); if(st.ecHi)a.push('EC HIGH'); if(st.ecLo)a.push('EC LOW');
@@ -174,7 +230,10 @@ function render(){
   if(st.phSp!=null) $("phtgt").textContent=`target ${st.phSp} · alarms ${st.phAlo}–${st.phAhi}`;
   if(st.ecSp!=null) $("ectgt").textContent=`target ${st.ecSp} · alarms ${st.ecAlo}–${st.ecAhi}`;
   $("auto").textContent=st.auto?"ON":"off"; $("queue").textContent=st.queue??"–";
+  const ab=$("autobtn"); if(ab){ ab.textContent=st.auto?'Autonomous: ON — tap to stop':'Autonomous: OFF — tap to start'; ab.className=st.auto?'warn':'sec'; }
   $("uptime").textContent=st.uptime!=null?st.uptime+" s":"–";
+  const df=(st.phF||0)+(st.ecF||0)+(st.tF||0);
+  $("drops").textContent = df ? ('sensor drops — pH:'+st.phF+' EC:'+st.ecF+' T:'+st.tF) : '';
   remain=st.lockRemain||0; remainSync=Date.now();
   if(st.iPh!=null) $("iterm").textContent='integrator: pH '+Number(st.iPh).toFixed(2)+' mL · EC '+Number(st.iEc).toFixed(2)+' mL';
   if(st.phOk)pp('ph',st.ph); if(st.ecOk)pp('ec',st.ec); if(st.tempOk)pp('temp',st.temp);
@@ -264,7 +323,20 @@ function saveSettings(){ const q=SKEYS.map(([k,id])=>k+'='+encodeURIComponent($(
 async function loadLog(){ try{ const r=await fetch('/api/log'); const a=await r.json();
   $("log").textContent=a.map(e=>`${(e.t/1000)|0}s  ${e.who}  ${e.action}  ${e.detail}`).join("\n"); }catch(_){} }
 async function whoami(){ try{ const r=await fetch('/api/whoami'); const j=await r.json();
-  isTailnet=(j.origin==='tailnet'); applyCaps(); }catch(_){} }
+  isTailnet=(j.origin==='tailnet'); applyCaps(); if(isTailnet){ loadNotify(); loadTs(); } }catch(_){} }
+
+async function loadNotify(){ try{ const r=await fetch('/api/notify'); const j=await r.json();
+  if(document.activeElement!==$("nfurl")) $("nfurl").value=j.url||''; $("nfon").checked=!!j.on; }catch(_){} }
+function saveNotify(){ const u=encodeURIComponent($("nfurl").value.trim()), on=$("nfon").checked?1:0;
+  post('/api/notify?on='+on+'&url='+u).then(ok=>{ $("nfmsg").textContent=ok?'saved':'failed'; setTimeout(()=>$("nfmsg").textContent='',2500); }); }
+function testNotify(){ post('/api/notify/test').then(ok=>{ $("nfmsg").textContent=ok?'test queued — check destination':'failed'; setTimeout(()=>$("nfmsg").textContent='',5000); }); }
+
+async function loadTs(){ try{ const r=await fetch('/api/thingspeak'); const j=await r.json();
+  if(document.activeElement!==$("tskey")) $("tskey").value=j.key||''; $("tson").checked=!!j.on;
+  if(document.activeElement!==$("tsint")) $("tsint").value=j.interval||60; }catch(_){} }
+function saveTs(){ const k=encodeURIComponent($("tskey").value.trim()), on=$("tson").checked?1:0, iv=$("tsint").value||60;
+  post('/api/thingspeak?on='+on+'&interval='+iv+'&key='+k).then(ok=>{ $("tsmsg").textContent=ok?'saved':'failed'; setTimeout(()=>$("tsmsg").textContent='',2500); }); }
+function testTs(){ post('/api/thingspeak/test').then(ok=>{ $("tsmsg").textContent=ok?'test queued — check ThingSpeak':'failed'; setTimeout(()=>$("tsmsg").textContent='',5000); }); }
 
 async function loadIdentity(){ try{ const r=await fetch('/api/identity'); const j=await r.json();
   if(document.activeElement!==$("idname")) $("idname").value=j.name||'';
@@ -320,7 +392,65 @@ function otaUpload(){
   x.send(fd);
 }
 
-renderCal(); whoami(); loadIdentity(); connect(); setInterval(tick,500);
+// ---- history chart: each series on its OWN scale; x-axis = time ago ----
+function fmtAgo(s){ s=Math.max(0,Math.round(s)); if(s===0)return'now'; if(s<3600)return Math.round(s/60)+'m'; return (s/3600).toFixed(1)+'h'; }
+async function loadHistory(){
+  try{ const r=await fetch('/api/history?n=600'); drawChart(await r.json()); }catch(_){}
+}
+function drawChart(d){
+  const c=$("chart"); const W=c.width=c.clientWidth||600, H=c.height=210;
+  const x=c.getContext('2d'); x.clearRect(0,0,W,H);
+  if(d){
+    $("histinfo").textContent=' · '+(d.count||0)+'/'+(d.cap||0)+' pts ('+(d.pct||0)+'%), '
+      +Math.round((d.bytes||0)/1024)+' KB '+(d.psram?'PSRAM':'RAM')+' · '+d.interval+'s';
+    const sel=$("logsel"); if(sel && document.activeElement!==sel) sel.value=d.interval;
+    const li=$("loginput"); if(li && document.activeElement!==li) li.value=d.interval;
+  }
+  const L=6,R=6,T=6,B=20;
+  if(!d || !d.n){ x.fillStyle='#7f9aa6'; x.font='13px system-ui'; x.fillText('no data yet',10,20); return; }
+  const span=d.age.length?d.age[0]:1;
+  // time grid + x-axis labels (left = oldest, right = now)
+  x.strokeStyle='#1d2730'; x.fillStyle='#6b7d88'; x.font='11px system-ui'; x.textAlign='center';
+  for(let k=0;k<=4;k++){ const f=k/4, px=L+(W-L-R)*f;
+    x.beginPath(); x.moveTo(px,T); x.lineTo(px,H-B); x.stroke();
+    x.fillText(fmtAgo(span*(1-f)), px, H-6); }
+  x.textAlign='start';
+  const series=[['#f39c12',d.ph,'lgph','pH',2],['#3498db',d.ec,'lgec','EC',2],['#1ab6c8',d.temp,'lgtemp','temp',1]];
+  series.forEach(([color,arr,lid,lbl,dp])=>{
+    const el=$(lid), vals=arr.filter(v=>v!=null);
+    if(!vals.length){ if(el)el.textContent=lbl+' --'; return; }
+    let mn=Math.min(...vals), mx=Math.max(...vals); if(mx-mn<1e-6){mn-=1;mx+=1;}
+    mn=Math.max(0,mn);                                                   // pH/EC/temp never go negative
+    if(el) el.textContent=lbl+' '+mn.toFixed(dp)+'-'+mx.toFixed(dp);     // its own range
+    x.strokeStyle=color; x.lineWidth=1.6; x.beginPath(); let started=false;
+    for(let i=0;i<arr.length;i++){ const v=arr[i]; if(v==null){started=false;continue;}
+      const px=L+(W-L-R)*(span-d.age[i])/span;
+      const py=(H-B)-(H-B-T)*(v-mn)/(mx-mn);
+      if(!started){x.moveTo(px,py);started=true;}else x.lineTo(px,py); }
+    x.stroke();
+  });
+}
+function toggleAuto(){ post('/api/auto?on='+(st.auto?0:1)).then(ok=>{ if(ok) logLine('autonomous dosing '+(st.auto?'OFF':'ON')); }); }
+function tuneStart(ch){ if(!confirm('Auto-tune '+ch.toUpperCase()+'? Doses a test bolus and turns autonomous OFF.')) return;
+  post('/api/tune/start?ch='+ch).then(ok=>{ if(ok){ logLine('auto-tune '+ch+' started'); loadTune(); } }); }
+function tuneAbort(){ post('/api/tune/abort').then(()=>loadTune()); }
+function tuneApply(){ post('/api/tune/apply').then(ok=>{ if(ok){ logLine('tuned gains applied'); loadTune(); } }); }
+async function loadTune(){ try{ const r=await fetch('/api/tune'); const t=await r.json(); let x;
+  if(t.state==='baseline')      x='measuring baseline… '+t.elapsed+'s';
+  else if(t.state==='observe')  x='observing response… '+t.elapsed+'s, '+t.n+' pts ('+t.msg+')';
+  else if(t.state==='done')     x='proposed: Kp='+t.kp.toFixed(2)+'  Ki='+t.ki.toFixed(3)+'  (gain '+t.K.toFixed(3)+'/mL, dead '+t.L+'s, τ '+t.T+'s)';
+  else if(t.state==='error')    x='error: '+t.msg;
+  else                          x='idle';
+  $("tunestat").textContent=x; $("tuneresult").hidden=(t.state!=='done');
+}catch(_){} }
+function setLog(s){ post('/api/loginterval?s='+s).then(ok=>{ if(ok){ logLine('log interval -> '+s+'s (history cleared)'); loadHistory(); } else logLine('interval rejected (1-3600 s)'); }); }
+function setLogInterval(){ setLog($("logsel").value); }
+function setLogIntervalCustom(){ const s=parseInt($("loginput").value,10); if(s>=1&&s<=3600) setLog(s); else alert('Enter 1 to 3600 seconds'); }
+function clearHistory(){ if(!confirm('Clear all logged history from memory?')) return;
+  post('/api/history/clear').then(ok=>{ if(ok){ logLine('history cleared'); loadHistory(); } }); }
+setInterval(loadHistory, 30000);
+setInterval(()=>{ const d=$("autotune"); if(d&&d.open) loadTune(); }, 2000);   // poll tune only while open
+renderCal(); whoami(); loadIdentity(); connect(); loadHistory(); setInterval(tick,500);
 </script>
 </body>
 </html>

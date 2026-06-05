@@ -2,6 +2,7 @@
 #include "config.h"
 #include "commands.h"
 #include "settings.h"
+#include "tune.h"
 #include <Arduino.h>
 
 // Per-channel PI, dose-and-wait. Pump indices: 0 = acid, 1 = nutrient A, 2 = nutrient B.
@@ -49,6 +50,7 @@ static float piStep(float& I, float e, float Kp, float Ki, float dtMin,
 }
 
 void control_tick(const SensorState& s) {
+  if (tune_active()) return;     // don't fight the auto-tune test
   if (!autoOn) return;
   if (s.lastUpdateMs == 0 || s.lastUpdateMs == lastProcessed) return;  // only on a fresh reading
   lastProcessed = s.lastUpdateMs;

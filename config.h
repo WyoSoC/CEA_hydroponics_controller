@@ -54,6 +54,38 @@ constexpr float PH_MIN = 2.0f,  PH_MAX = 12.0f;
 constexpr float EC_MIN = 0.0f,  EC_MAX = 50000.0f;
 constexpr float TEMP_DEFAULT = 25.0f;   // compensation fallback if RTD read fails
 
+// ===== Sensor read robustness =====
+constexpr int           SENSOR_READ_RETRIES = 2;       // re-issue a read this many times on I2C failure
+constexpr unsigned long DOSE_SETTLE_MS      = 3000;    // pause sampling this long after a dose (EMI settle)
+constexpr int           BUS_RECOVER_CYCLES  = 5;       // consecutive all-sensors-failed cycles -> reinit I2C
+
+// ===== Local data logging (history ring buffer) =====
+constexpr int    LOG_INTERVAL_S   = 10;                                // default seconds between samples
+constexpr int    LOG_INTERVAL_MIN = 1;                                 // user-settable range (s)
+constexpr int    LOG_INTERVAL_MAX = 3600;
+constexpr int    LOG_DAYS       = 7;                                   // target history window
+constexpr size_t LOG_CAPACITY   = (size_t)LOG_DAYS * 24 * 3600 / LOG_INTERVAL_S;  // 60480
+// 8 bytes/sample -> ~473 KB for 7 days; lives in PSRAM (needs Tools->PSRAM enabled).
+// Falls back to ~1 day in internal RAM if PSRAM is unavailable. Volatile (cleared on reboot).
+constexpr size_t LOG_FALLBACK_CAP = (size_t)1 * 24 * 3600 / LOG_INTERVAL_S;       // 8640
+
+// ===== Auto-tune (step-response FOPDT identification -> SIMC/IMC gains) =====
+constexpr float         TUNE_PH_DOSE_ML    = 0.5f;     // acid bolus for pH ID (small; pH is irreversible)
+constexpr float         TUNE_EC_DOSE_ML    = 1.0f;     // nutrient bolus (per pump) for EC ID
+constexpr unsigned long TUNE_BASELINE_MS   = 30000;    // average a baseline for ~30 s first
+constexpr unsigned long TUNE_MAX_MS        = 600000;   // give up observing after 10 min
+constexpr unsigned long TUNE_MIN_OBS_MS    = 60000;    // don't declare "settled" before this (dead time)
+constexpr float         TUNE_MIN_CHANGE_PH = 0.10f;    // need >= this much movement to be valid
+constexpr float         TUNE_MIN_CHANGE_EC = 0.05f;    // mS/cm
+constexpr float         TUNE_LAMBDA_FACTOR = 2.0f;     // lambda = factor * dead-time (conservative)
+
+// ===== Alarm notifications =====
+constexpr unsigned long NOTIFY_RENOTIFY_MS = 30UL * 60UL * 1000UL;  // re-send while an alarm persists
+
+// ===== ThingSpeak cloud upload =====
+constexpr int TS_MIN_INTERVAL_S     = 15;    // free-tier minimum between updates
+constexpr int TS_DEFAULT_INTERVAL_S = 60;
+
 // ===== Web control guardrails =====
 constexpr float    MANUAL_MAX_DOSE_ML = 25.0f;  // clamp on any single manual dispense
 constexpr uint32_t DEFAULT_UNLOCK_MIN = 60;     // default public-control unlock duration

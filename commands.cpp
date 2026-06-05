@@ -2,6 +2,7 @@
 #include "config.h"
 #include "devices.h"
 #include "control.h"
+#include "sensors.h"
 #include <Ezo_i2c.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -9,10 +10,15 @@
 
 static QueueHandle_t q = nullptr;
 static CmdReporter   reporter = nullptr;
+static char          lastAction[40] = {0};
+static unsigned long lastActionMs = 0;
 
 void commands_begin() {
   q = xQueueCreate(16, sizeof(Command));
 }
+
+const char*   commands_last_action()    { return lastAction; }
+unsigned long commands_last_action_ms() { return lastActionMs; }
 
 void commands_set_reporter(CmdReporter r) { reporter = r; }
 
@@ -50,6 +56,9 @@ void commands_execute(const Command& c) {
       p->send_cmd_with_num("d,", c.value);
       delay(EZO_READ_DELAY);
       p->receive_cmd(buf, sizeof(buf));
+      snprintf(lastAction, sizeof(lastAction), "%s %.2fmL", p->get_name(), c.value);
+      lastActionMs = millis();
+      sensors_pause(DOSE_SETTLE_MS);   // let pump EMI settle before next sensor read
       report("%s dispense %.2f mL => %s", p->get_name(), c.value, buf);
       break;
     }
@@ -59,6 +68,8 @@ void commands_execute(const Command& c) {
       p->send_cmd("x");
       delay(EZO_CMD_DELAY);
       p->receive_cmd(buf, sizeof(buf));
+      snprintf(lastAction, sizeof(lastAction), "stop %s", p->get_name());
+      lastActionMs = millis();
       report("%s STOP => %s", p->get_name(), buf);
       break;
     }
