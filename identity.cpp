@@ -26,7 +26,9 @@ void identity_begin() {
   if (g_name.length() == 0 || g_host.length() == 0) {
     uint64_t mac = ESP.getEfuseMac();
     char suf[7];
-    snprintf(suf, sizeof(suf), "%06x", (unsigned)(mac & 0xFFFFFF));
+    // Use the device-unique HIGH 3 bytes. The low 3 bytes are the Espressif OUI
+    // (shared across a production batch) and collide between units.
+    snprintf(suf, sizeof(suf), "%06x", (unsigned)((mac >> 24) & 0xFFFFFF));
     if (g_host.length() == 0) g_host = String("hydro-") + suf;
     if (g_name.length() == 0) g_name = String("Hydro-") + suf;
   }

@@ -56,8 +56,10 @@ static String fmtDuration(unsigned long ms) {
 
 static bool httpPost(const String& url, const String& body) {
   if (!net_connected() || url.length() < 8) return false;
+  if (ESP.getFreeHeap() < NET_MIN_FREE_HEAP) { Serial.println(F("[notify] low heap — skip")); return false; }
   HTTPClient http;
-  http.setConnectTimeout(5000); http.setTimeout(8000);
+  http.setReuse(false);
+  http.setConnectTimeout(4000); http.setTimeout(6000);
   bool ok = false;
   if (url.startsWith("https")) {
     WiFiClientSecure cs; cs.setInsecure();

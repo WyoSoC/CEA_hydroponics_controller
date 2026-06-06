@@ -9,3 +9,4 @@ bool net_connected();
 
 bool   net_time_valid();   // true once NTP has synced
 String net_time_str();     // "YYYY-MM-DD HH:MM:SS" local, or "uptime Ns" before sync
+const char* reset_reason_str();   // human-readable cause of the last reset

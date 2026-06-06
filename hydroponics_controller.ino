@@ -36,11 +36,17 @@
 #include "access.h"
 #include "ota.h"
 #include "identity.h"
+#include "nettask.h"
+
+// Bigger loop-task stack. TLS (HTTPS alert) handshakes are stack-heavy and the default
+// 8 KB loop stack can overflow during a secure POST -> crash/reset. 16 KB gives margin.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 void setup() {
   Serial.begin(115200);
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 3000) delay(10);   // wait briefly for USB serial
+  Serial.printf("[boot] reset reason: %s\n", reset_reason_str());   // diagnose unexpected reboots
 
   devices_begin();
   sensors_begin();
@@ -56,6 +62,7 @@ void setup() {
   access_begin();                       // lock state (default LOCKED) + audit log
   net_begin();                          // Wi-Fi station (non-blocking)
   web_begin();                          // HTTP + WebSocket server
+  nettask_begin();                      // dedicated task for blocking outbound HTTP (ThingSpeak/alerts)
   display_begin();                      // on-board TFT status screen
 
   Serial.println(F("\nHydroponics controller — core + web ready. Type 'help'."));
@@ -72,8 +79,7 @@ void loop() {
   tune_tick(sensors_snapshot());        // auto-tune step-response (no-op unless running)
   control_tick(sensors_snapshot());     // autonomous dosing (no-op unless enabled)
   history_tick(sensors_snapshot());     // sample into the data log every LOG_INTERVAL_S
-  notify_tick(sensors_snapshot());      // fire alarm notifications on transitions
-  ts_tick(sensors_snapshot());          // periodic ThingSpeak upload
+  // notify_tick / ts_tick now run on the dedicated nettask (blocking HTTP off the loop).
   display_tick(sensors_snapshot());     // refresh the TFT (~1 Hz internally)
   console_tick();                       // serial UI
   net_tick();                           // manage Wi-Fi (re)connection

@@ -80,8 +80,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
   <div id="histadmin" hidden>
     <div class="row">
-      interval <select id="logsel" onchange="setLogInterval()"><option value="5">5 s</option><option value="10">10 s</option><option value="30">30 s</option></select>
-      or <input type="number" id="loginput" min="1" max="3600" step="1" style="width:70px"> s
+      interval <input type="number" id="loginput" min="1" max="3600" step="1" style="width:70px"> s
       <button onclick="setLogIntervalCustom()">Set</button>
       <button class="warn" onclick="clearHistory()">Clear memory</button>
       <span class="muted">1–3600 s; changing also clears history</span>
@@ -180,16 +179,21 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <button onclick="unlock()">Unlock public control</button>
     <button class="warn" onclick="lock()">Lock</button>
     <button class="sec" onclick="loadLog()">Refresh audit log</button></div>
+  <div class="muted" id="dosetotals">Total dosed since boot: —</div>
   <div id="log"></div>
   <hr>
-  <div class="row">Firmware update (.bin) <input type="file" id="otafile" accept=".bin">
-    <button onclick="otaUpload()">Upload &amp; flash</button>
-    <span id="otaprog" class="muted"></span></div>
-  <div class="muted">Tailnet only. Device reboots into the new firmware on success.</div>
-  <hr>
-  <div class="row">Unit name <input id="idname" style="width:150px"> hostname <input id="idhost" style="width:150px">
-    <button onclick="setIdentity()">Rename &amp; reboot</button> <span id="idmsg" class="muted"></span></div>
-  <div class="muted">Sets this unit's display name + mDNS hostname (&lt;host&gt;.local). Reboots to apply.</div>
+  <details class="help"><summary>Firmware update</summary>
+    <div class="muted">Current firmware: <b id="fwcur">v?</b></div>
+    <div class="row">New firmware (.bin) <input type="file" id="otafile" accept=".bin">
+      <button onclick="otaUpload()">Upload &amp; flash</button>
+      <span id="otaprog" class="muted"></span></div>
+    <div class="muted">Tailnet only. Device reboots into the new firmware on success.</div>
+  </details>
+  <details class="help"><summary>Rename unit (name &amp; hostname)</summary>
+    <div class="row">Unit name <input id="idname" style="width:150px"> hostname <input id="idhost" style="width:150px">
+      <button onclick="setIdentity()">Rename &amp; reboot</button> <span id="idmsg" class="muted"></span></div>
+    <div class="muted">Sets this unit's display name + mDNS hostname (&lt;host&gt;.local). Reboots to apply.</div>
+  </details>
 </section>
 
 <footer><span>updated <b id="age">–</b></span><span>auto-dosing: <b id="auto">–</b></span>
@@ -240,6 +244,7 @@ function render(){
   $("uptime").textContent=st.uptime!=null?st.uptime+" s":"–";
   const df=(st.phF||0)+(st.ecF||0)+(st.tF||0);
   $("drops").textContent = df ? ('sensor drops — pH:'+st.phF+' EC:'+st.ecF+' T:'+st.tF) : '';
+  if(st.dAcid!=null) $("dosetotals").textContent='Total dosed since boot — acid '+(+st.dAcid).toFixed(1)+' mL · nutrient A '+(+st.dNutA).toFixed(1)+' mL · nutrient B '+(+st.dNutB).toFixed(1)+' mL';
   remain=st.lockRemain||0; remainSync=Date.now();
   if(st.iPh!=null) $("iterm").textContent='integrator: pH '+Number(st.iPh).toFixed(2)+' mL · EC '+Number(st.iEc).toFixed(2)+' mL';
   if(st.phOk)pp('ph',st.ph); if(st.ecOk)pp('ec',st.ec); if(st.tempOk)pp('temp',st.temp);
@@ -329,8 +334,10 @@ function saveSettings(){ const q=SKEYS.map(([k,id])=>k+'='+encodeURIComponent($(
 async function loadLog(){ try{ const r=await fetch('/api/log'); const a=await r.json();
   $("log").textContent=a.map(e=>`${(e.t/1000)|0}s  ${e.who}  ${e.action}  ${e.detail}`).join("\n"); }catch(_){} }
 async function whoami(){ try{ const r=await fetch('/api/whoami'); const j=await r.json();
-  isTailnet=(j.origin==='tailnet'); applyCaps(); if(isTailnet){ loadNotify(); loadTs(); }
-  if(j.fw) $("fwver").textContent='firmware v'+j.fw; if(j.fw&&j.build) $("fwver").title='build '+j.build; }catch(_){} }
+  isTailnet=(j.origin==='tailnet'); applyCaps(); if(isTailnet){ loadNotify(); loadTs(); loadLog(); }
+  if(j.fw){ $("fwver").textContent='firmware v'+j.fw; $("fwver").title=j.build?('build '+j.build):'';
+    const c=$("fwcur"); if(c) c.textContent='v'+j.fw+(j.build?' (build '+j.build+')':''); }
+  }catch(_){} }
 
 async function loadNotify(){ try{ const r=await fetch('/api/notify'); const j=await r.json();
   if(document.activeElement!==$("nfurl")) $("nfurl").value=j.url||''; $("nfon").checked=!!j.on; }catch(_){} }
@@ -410,7 +417,6 @@ function drawChart(d){
   if(d){
     $("histinfo").textContent=' · '+(d.count||0)+'/'+(d.cap||0)+' pts ('+(d.pct||0)+'%), '
       +Math.round((d.bytes||0)/1024)+' KB '+(d.psram?'PSRAM':'RAM')+' · '+d.interval+'s';
-    const sel=$("logsel"); if(sel && document.activeElement!==sel) sel.value=d.interval;
     const li=$("loginput"); if(li && document.activeElement!==li) li.value=d.interval;
   }
   const L=6,R=6,T=6,B=20;
@@ -451,7 +457,6 @@ async function loadTune(){ try{ const r=await fetch('/api/tune'); const t=await 
   $("tunestat").textContent=x; $("tuneresult").hidden=(t.state!=='done');
 }catch(_){} }
 function setLog(s){ post('/api/loginterval?s='+s).then(ok=>{ if(ok){ logLine('log interval -> '+s+'s (history cleared)'); loadHistory(); } else logLine('interval rejected (1-3600 s)'); }); }
-function setLogInterval(){ setLog($("logsel").value); }
 function setLogIntervalCustom(){ const s=parseInt($("loginput").value,10); if(s>=1&&s<=3600) setLog(s); else alert('Enter 1 to 3600 seconds'); }
 function clearHistory(){ if(!confirm('Clear all logged history from memory?')) return;
   post('/api/history/clear').then(ok=>{ if(ok){ logLine('history cleared'); loadHistory(); } }); }

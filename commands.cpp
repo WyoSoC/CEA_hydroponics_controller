@@ -12,6 +12,7 @@ static QueueHandle_t q = nullptr;
 static CmdReporter   reporter = nullptr;
 static char          lastAction[40] = {0};
 static unsigned long lastActionMs = 0;
+static float         totalDosed[3] = {0, 0, 0};   // cumulative forward mL since boot (acid, nutA, nutB)
 
 void commands_begin() {
   q = xQueueCreate(16, sizeof(Command));
@@ -19,6 +20,7 @@ void commands_begin() {
 
 const char*   commands_last_action()    { return lastAction; }
 unsigned long commands_last_action_ms() { return lastActionMs; }
+float         commands_total_dosed(uint8_t i) { return i < 3 ? totalDosed[i] : 0; }
 
 void commands_set_reporter(CmdReporter r) { reporter = r; }
 
@@ -58,6 +60,7 @@ void commands_execute(const Command& c) {
       p->receive_cmd(buf, sizeof(buf));
       snprintf(lastAction, sizeof(lastAction), "%s %.2fmL", p->get_name(), c.value);
       lastActionMs = millis();
+      if (c.value > 0) totalDosed[c.target] += c.value;   // accumulate dosing total (forward only)
       sensors_pause(DOSE_SETTLE_MS);   // let pump EMI settle before next sensor read
       report("%s dispense %.2f mL => %s", p->get_name(), c.value, buf);
       break;

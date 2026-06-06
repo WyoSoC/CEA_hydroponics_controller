@@ -31,3 +31,6 @@ uint8_t commands_pending();                // queued count
 // Last pump action (for the TFT). e.g. "acid 0.50mL" / "stop nutA". 0 ms = none yet.
 const char*   commands_last_action();
 unsigned long commands_last_action_ms();
+
+// Cumulative forward volume dosed per pump since boot (mL): idx 0=acid, 1=nutA, 2=nutB.
+float commands_total_dosed(uint8_t idx);

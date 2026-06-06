@@ -37,8 +37,12 @@ Everything is **non-blocking and single-I2C-owner**:
 - All actions (dose, stop, calibrate, set-auto) are placed on a **FreeRTOS command queue**
   and executed only at a safe point between poll cycles — so the async web server can enqueue
   from its own task without ever touching I2C concurrently.
-- Periodic/event work (`control_tick`, `history_tick`, `notify_tick`, `ts_tick`, `tune_tick`,
-  `display_tick`) runs from `loop()` and is internally rate-gated.
+- Periodic/event work (`control_tick`, `history_tick`, `tune_tick`, `display_tick`) runs from
+  `loop()` and is internally rate-gated.
+- **Blocking outbound HTTP** (`notify_tick`, `ts_tick`) runs on a **dedicated FreeRTOS task**
+  (`nettask`, pinned to the app core with a 16 KB TLS-safe stack). A slow/poor link can block
+  these for seconds; isolating them keeps `loop()` (sensing, dosing, TFT) responsive and avoids
+  starving the async web stack — the suspected PANIC trigger on a high-latency unit.
 
 ### Module map
 
@@ -58,6 +62,7 @@ Everything is **non-blocking and single-I2C-owner**:
 | `access.*` | Request-origin classification, the public-control **lock**, audit log. |
 | `notify.*` | Alarm notifier (email-via-relay or webhook), NTP-timestamped. |
 | `thingspeak.*` | Periodic cloud upload of readings. |
+| `nettask.*` | Dedicated FreeRTOS task running the blocking outbound HTTP (`notify_tick`/`ts_tick`) off `loop()`. |
 | `tune.*` | Guided FOPDT auto-tune → SIMC gains (propose-and-apply). |
 | `ota.*` | Tailnet-only OTA firmware upload. |
 | `display.*` | On-board ST7789 TFT status screen. |
@@ -76,7 +81,7 @@ Everything is **non-blocking and single-I2C-owner**:
 - Anti-windup: integrator floored at 0, conditional integration when saturated, bled down on
   the overshoot side; integrators reset on enable (bumpless).
 - **No derivative** (large dead time + noisy probes). Autonomous dosing defaults **OFF** and
-  resets OFF on every reboot (fail-safe).
+  **resets OFF on every reboot** (fail-safe) — re-enable after a restart.
 - Auto-tune (`tune.*`) doses one bolus, fits FOPDT (two-point 28.3 %/63.2 %), computes
   `Kp/Ki` via SIMC (λ = 2·L, no-overshoot), and **proposes** them for review.
 
@@ -135,7 +140,8 @@ The server pushes a JSON **state** object on connect and on each reading:
   phSp, phAlo, phAhi, phKp, phKi, phMin,               // pH settings
   ecSp, ecAlo, ecAhi, ecKp, ecKi, ecMin,               // EC settings (mS/cm)
   iPh, iEc,                                            // PI integrator terms
-  phF, ecF, tF }                                       // consecutive sensor-fail counts
+  phF, ecF, tF,                                        // consecutive sensor-fail counts
+  dAcid, dNutA, dNutB }                                // mL dosed per pump since boot
 ```
 
 `ec` is in µS/cm (the dashboard divides by 1000 for mS/cm). Command results are pushed as

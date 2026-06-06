@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <esp_system.h>
 
 static unsigned long lastRetry = 0;
 
@@ -39,6 +40,22 @@ void net_tick() {
   if (!now && millis() - lastRetry > 10000) {   // nudge a reconnect every 10 s
     lastRetry = millis();
     WiFi.reconnect();
+  }
+}
+
+// Why the chip last reset — the key diagnostic for unexpected reboots.
+const char* reset_reason_str() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "power-on";
+    case ESP_RST_EXT:       return "external reset";
+    case ESP_RST_SW:        return "software (ESP.restart)";     // our OTA / identity reboots
+    case ESP_RST_PANIC:     return "PANIC/exception (crash or stack overflow)";
+    case ESP_RST_INT_WDT:   return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:  return "task watchdog (loop blocked too long)";
+    case ESP_RST_WDT:       return "other watchdog";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT (power dip)";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep wake";
+    default:                return "unknown";
   }
 }
 

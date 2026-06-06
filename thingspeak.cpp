@@ -32,18 +32,19 @@ void ts_request_test() { testReq = true; }
 
 static bool ts_post(const SensorState& s) {
   if (!net_connected() || g_key.length() < 4) return false;
+  if (ESP.getFreeHeap() < NET_MIN_FREE_HEAP) { Serial.println(F("[ts] low heap — skip")); return false; }
   String url = "http://api.thingspeak.com/update?api_key=" + g_key;
   if (s.phValid)   url += "&field1=" + String(s.ph, 2);
   if (s.ecValid)   url += "&field2=" + String(s.ec / 1000.0, 3);   // mS/cm
   if (s.tempValid) url += "&field3=" + String(s.tempC, 1);
 
   HTTPClient http; WiFiClient cl;
-  http.setConnectTimeout(5000); http.setTimeout(8000);
+  http.setReuse(false);
+  http.setConnectTimeout(3000); http.setTimeout(4000);   // fail fast on poor network
   bool ok = false;
   if (http.begin(cl, url)) {
     int code = http.GET();
-    String body = http.getString();        // ThingSpeak returns the new entry ID (>0) on success, 0 on fail/rate-limit
-    ok = (code == 200 && body.toInt() > 0);
+    ok = (code == 200);            // don't read the body — avoids reads on a stalled stream
     http.end();
   }
   Serial.printf("[ts] update -> %s\n", ok ? "ok" : "FAIL");

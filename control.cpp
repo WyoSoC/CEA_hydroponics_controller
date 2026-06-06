@@ -13,7 +13,7 @@ static unsigned long acidWindowStart = 0;
 static int           acidCount = 0;
 static float         I_ph = 0.0f, I_ec = 0.0f;   // integrator terms (mL)
 
-void control_begin() {}
+void control_begin() {}   // autonomous dosing always starts OFF on boot (fail-safe)
 
 void control_set_auto(bool on) {
   autoOn = on;

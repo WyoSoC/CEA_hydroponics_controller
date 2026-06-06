@@ -3,8 +3,8 @@
 
 // Alarm notifier: on an alarm transition, HTTP-POSTs a JSON alert to a configurable
 // webhook URL (point it at a Google Apps Script for email, or ntfy/Slack/Discord/etc).
-// Edge-triggered (ALARM on enter, CLEAR on exit), re-sends every NOTIFY_RENOTIFY_MS
-// while active. All HTTP runs from the main loop (never the async web task).
+// Edge-triggered: one ALARM on enter, one CLEAR on return-to-normal (no re-sends while
+// active). The blocking HTTP runs on the dedicated nettask (never the async web task).
 void        notify_begin();
 void        notify_tick(const SensorState& s);
 void        notify_set(const String& url, bool on);   // persists to NVS

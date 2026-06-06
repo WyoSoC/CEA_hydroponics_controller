@@ -14,6 +14,7 @@
 #include "tune.h"
 #include "thingspeak.h"
 #include "version.h"
+#include "net.h"
 #include "secrets.h"
 #include <Arduino.h>
 #include <math.h>
@@ -61,7 +62,8 @@ static void buildJson(char* out, size_t n) {
     "\"phLo\":%s,\"phHi\":%s,\"ecLo\":%s,\"ecHi\":%s,"
     "\"phSp\":%.2f,\"phAlo\":%.2f,\"phAhi\":%.2f,\"phKp\":%.2f,\"phKi\":%.3f,\"phMin\":%u,"
     "\"ecSp\":%.2f,\"ecAlo\":%.2f,\"ecAhi\":%.2f,\"ecKp\":%.2f,\"ecKi\":%.3f,\"ecMin\":%u,"
-    "\"iPh\":%.2f,\"iEc\":%.2f,\"phF\":%d,\"ecF\":%d,\"tF\":%d}",
+    "\"iPh\":%.2f,\"iEc\":%.2f,\"phF\":%d,\"ecF\":%d,\"tF\":%d,"
+    "\"dAcid\":%.1f,\"dNutA\":%.1f,\"dNutB\":%.1f}",
     identity_name(),
     ph,   s.phValid   ? "true" : "false",
     ec,   s.ecValid   ? "true" : "false",
@@ -76,7 +78,8 @@ static void buildJson(char* out, size_t n) {
     set.ph_sp, set.ph_lo, set.ph_hi, set.ph_kp, set.ph_ki, (unsigned)set.ph_min,
     set.ec_sp, set.ec_lo, set.ec_hi, set.ec_kp, set.ec_ki, (unsigned)set.ec_min,
     control_integral_ph(), control_integral_ec(),
-    sensors_fail_ph(), sensors_fail_ec(), sensors_fail_temp());
+    sensors_fail_ph(), sensors_fail_ec(), sensors_fail_temp(),
+    commands_total_dosed(0), commands_total_dosed(1), commands_total_dosed(2));
 }
 
 // ---- websocket -------------------------------------------------------------
@@ -84,7 +87,7 @@ static void buildJson(char* out, size_t n) {
 static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                       AwsEventType type, void* arg, uint8_t* data, size_t len) {
   if (type == WS_EVT_CONNECT) {
-    char buf[640];
+    char buf[832];
     buildJson(buf, sizeof(buf));
     client->text(buf);
   }
@@ -115,7 +118,10 @@ static void registerRoutes() {
     String j = String("{\"origin\":\"") + (o == ORIGIN_TAILNET ? "tailnet" : "public") +
                "\",\"secretOk\":" + (access_secret_ok(req) ? "true" : "false") +
                ",\"fw\":\"" FW_VERSION "\",\"build\":\"" + FW_BUILD +
-               "\",\"name\":\"" + identity_name() + "\"}";
+               "\",\"reset\":\"" + reset_reason_str() +
+               "\",\"name\":\"" + identity_name() +
+               "\",\"heap\":" + String(ESP.getFreeHeap()) +
+               ",\"minHeap\":" + String(ESP.getMinFreeHeap()) + "}";
     sendJson(req, 200, j);
   });
 
@@ -369,7 +375,7 @@ void web_tick() { ws.cleanupClients(); }
 
 void web_broadcast() {
   if (ws.count() == 0) return;
-  char buf[768];
+  char buf[832];
   buildJson(buf, sizeof(buf));
   ws.textAll(buf);
 }

@@ -79,6 +79,11 @@ constexpr float         TUNE_MIN_CHANGE_PH = 0.10f;    // need >= this much move
 constexpr float         TUNE_MIN_CHANGE_EC = 0.05f;    // mS/cm
 constexpr float         TUNE_LAMBDA_FACTOR = 2.0f;     // lambda = factor * dead-time (conservative)
 
+// ===== Network safety =====
+// Skip outbound HTTP (ThingSpeak/notify) if free heap is below this — avoids an
+// out-of-memory abort when a flaky network has fragmented/consumed the heap.
+constexpr uint32_t NET_MIN_FREE_HEAP = 40000;   // bytes
+
 // ===== Time (NTP) =====
 #define NTP_SERVER1 "pool.ntp.org"
 #define NTP_SERVER2 "time.nist.gov"
