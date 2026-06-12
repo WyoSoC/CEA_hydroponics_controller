@@ -11,6 +11,9 @@ bool   history_in_psram();
 int    history_interval_s();
 bool   history_set_interval(int s);   // 5/10/30 only; clears buffer + persists; true if applied
 void   history_clear();               // wipe all logged samples
+// Keep only the most recent `keepSeconds` of samples; drop everything older. Valid no-op
+// (still returns true) if less than that is logged. Returns false only on an unusable buffer.
+bool   history_trim_keep_recent(unsigned long keepSeconds);
 
 // Downsampled JSON for charting (<= maxPoints): {interval,n,ph,ec,temp,age}.
 String history_json(size_t maxPoints);

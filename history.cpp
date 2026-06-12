@@ -71,6 +71,19 @@ bool history_set_interval(int s) {
 
 void history_clear() { count = 0; head = 0; lastMs = 0; Serial.println(F("[history] cleared")); }
 
+bool history_trim_keep_recent(unsigned long keepSeconds) {
+  if (!buf || cap == 0 || g_interval <= 0) return false;
+  // Newest sample stays at `head-1`; at(i) reads from (head - count). Dropping the oldest
+  // samples is therefore just lowering `count` — no data moves, head/lastMs untouched.
+  size_t keep = (size_t)(keepSeconds / (unsigned long)g_interval);
+  if (keep < count) {
+    Serial.printf("[history] trimmed: kept newest %u of %u samples (~%lu s)\n",
+                  (unsigned)keep, (unsigned)count, keepSeconds);
+    count = keep;
+  }
+  return true;   // keep >= count -> nothing older to drop (valid no-op)
+}
+
 static inline Rec& at(size_t i) {              // i = 0 oldest .. count-1 newest
   return buf[(head + cap - count + i) % cap];
 }

@@ -266,6 +266,16 @@ static void registerRoutes() {
     sendJson(req, 200, "{\"ok\":true}");
   });
 
+  // trim history: keep only the most recent ?hours=X, drop everything older — tailnet only
+  server.on("/api/history/trim", HTTP_POST, [](AsyncWebServerRequest* req) {
+    if (access_origin(req) != ORIGIN_TAILNET) { sendJson(req, 403, "{\"err\":\"tailnet only\"}"); return; }
+    float hours = qp(req, "hours").toFloat();
+    if (hours <= 0.0f || hours > 24.0f * LOG_DAYS) { sendJson(req, 400, "{\"err\":\"hours must be 0..168\"}"); return; }
+    if (!history_trim_keep_recent((unsigned long)(hours * 3600.0f))) { sendJson(req, 500, "{\"err\":\"no buffer\"}"); return; }
+    access_log(ORIGIN_TAILNET, "history", (String("trim keep ") + hours + "h").c_str());
+    sendJson(req, 200, String("{\"ok\":true,\"count\":") + (unsigned)history_count() + "}");
+  });
+
   // history CSV export — chunked so we never build a multi-MB String in RAM
   server.on("/api/history.csv", HTTP_GET, [](AsyncWebServerRequest* req) {
     auto cursor = std::make_shared<size_t>(0);

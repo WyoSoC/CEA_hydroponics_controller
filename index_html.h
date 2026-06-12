@@ -82,8 +82,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="row">
       interval <input type="number" id="loginput" min="1" max="3600" step="1" style="width:70px"> s
       <button onclick="setLogIntervalCustom()">Set</button>
-      <button class="warn" onclick="clearHistory()">Clear memory</button>
       <span class="muted">1–3600 s; changing also clears history</span>
+    </div>
+    <div class="row">
+      <button class="warn" onclick="clearHistory()">Clear memory</button>
+      &nbsp;or keep last <input type="number" id="trimhrs" min="1" max="168" step="1" value="24" style="width:58px"> h
+      <button onclick="trimHistory()">Trim older</button>
+      <span class="muted">deletes everything older than the kept window</span>
     </div>
     <details class="help"><summary>ThingSpeak cloud upload</summary>
       <div class="row"><label><input type="checkbox" id="tson"> enable</label>
@@ -460,6 +465,9 @@ function setLog(s){ post('/api/loginterval?s='+s).then(ok=>{ if(ok){ logLine('lo
 function setLogIntervalCustom(){ const s=parseInt($("loginput").value,10); if(s>=1&&s<=3600) setLog(s); else alert('Enter 1 to 3600 seconds'); }
 function clearHistory(){ if(!confirm('Clear all logged history from memory?')) return;
   post('/api/history/clear').then(ok=>{ if(ok){ logLine('history cleared'); loadHistory(); } }); }
+function trimHistory(){ const h=parseFloat($("trimhrs").value); if(!(h>0&&h<=168)){ alert('Enter 1 to 168 hours'); return; }
+  if(!confirm('Delete all logged data older than '+h+' h (keep only the most recent '+h+' h)?')) return;
+  post('/api/history/trim?hours='+h).then(ok=>{ if(ok){ logLine('history trimmed to last '+h+' h'); loadHistory(); } else logLine('trim rejected'); }); }
 setInterval(loadHistory, 30000);
 setInterval(()=>{ const d=$("autotune"); if(d&&d.open) loadTune(); }, 2000);   // poll tune only while open
 renderCal(); whoami(); loadIdentity(); connect(); loadHistory(); setInterval(tick,500);
